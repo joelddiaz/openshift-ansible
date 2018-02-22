@@ -1,0 +1,57 @@
+---
+- set_fact:
+    need_new_lc: True
+    proposed_ami: "{{ openshift_aws_ami_map[openshift_aws_node_group.group] | default(openshift_aws_ami) }}"
+
+- name: fetch the security groups for launch config
+  ec2_group_facts:
+    filters:
+      group-name: "{{ openshift_aws_launch_config_security_groups[openshift_aws_node_group.group] }}"
+      vpc-id: "{{ vpcout.vpcs[0].id }}"
+    region: "{{ openshift_aws_region }}"
+  register: ec2sgs
+ 
+- name: get lc details from existing scale group
+  when: asgs.results|length > 0
+  block:
+ 
+  - name: fetch lc facts
+    ec2_lc_facts:
+      name: "{{ l_lc_name }}"
+      region: "{{ openshift_aws_region }}"
+    register: lc_facts
+  
+  - debug: var=lc_facts
+  
+  - name: need new lc?
+    set_fact:
+      need_new_lc: False
+    when:
+    - proposed_ami == lc_facts.launch_configurations[0].image_id
+    - l_node_group_config[openshift_aws_node_group.group].instance_type == lc_facts.launch_configurations[0].instance_type
+
+- debug:
+    var: need_new_lc
+#
+# Create the scale group config
+- name: Create the node scale group launch config
+  when: need_new_lc
+  ec2_lc:
+    name: "{{ openshift_aws_node_group.name }}-{{ openshift_aws_ami_map[openshift_aws_node_group.group] | default(openshift_aws_ami) }}-{{ l_epoch_time }}"
+    region: "{{ openshift_aws_region }}"
+    image_id: "{{ proposed_ami }}"
+    instance_type: "{{ l_node_group_config[openshift_aws_node_group.group].instance_type }}"
+    security_groups: "{{ openshift_aws_launch_config_security_group_id  | default(ec2sgs.security_groups | map(attribute='group_id')| list) }}"
+    instance_profile_name: "{{ l_node_group_config[openshift_aws_node_group.group].iam_role if l_node_group_config[openshift_aws_node_group.group].iam_role is defined and
+                                                                           l_node_group_config[openshift_aws_node_group.group].iam_role != '' and
+                                                                           openshift_aws_create_iam_role
+                                                                        else omit }}"
+    user_data: "{{ lookup('template', 'user_data.j2') }}"
+    key_name: "{{ openshift_aws_ssh_key_name }}"
+    ebs_optimized: False
+    volumes: "{{ l_node_group_config[openshift_aws_node_group.group].volumes }}"
+    assign_public_ip: True
+  register: lc_out
+
+- debug:
+    var: lc_out

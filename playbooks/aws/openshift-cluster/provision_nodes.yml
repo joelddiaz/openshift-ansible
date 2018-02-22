@@ -15,4 +15,5 @@
   - name: create the node groups
     import_role:
       name: openshift_aws
-      tasks_from: provision_nodes.yml
+      #tasks_from: provision_nodes.yml
+      tasks_from: idmpt_provision_nodes.yml
